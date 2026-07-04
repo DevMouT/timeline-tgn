@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline Tour de France 2026 – Tarragona</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.7"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.3.1",
+            "react/": "https://esm.sh/react@18.3.1/",
+            "react-dom": "https://esm.sh/react-dom@18.3.1",
+            "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+            "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.474.0?external=react"
+        }
+    }
+    </script>
+    <style>
+        .scrollbar-hide::-webkit-scrollbar{display:none}
+        .scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .spin{animation:spin 1s linear infinite}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        .fadeIn{animation:fadeIn .2s ease}
+        @keyframes pulse-bar{0%,100%{opacity:1}50%{opacity:.4}}
+        .pulse-bar{animation:pulse-bar 1.6s ease-in-out infinite}
+        body{font-family:'Source Sans 3',sans-serif}
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React,{useState,useEffect,useMemo,useCallback} from 'react';
+import{createRoot}from 'react-dom/client';
+import{RefreshCw,AlertCircle,ChevronDown,ChevronUp,Calendar,MapPin,Clock,Users,ArrowLeft,ChevronRight}from 'lucide-react';
+
+const SHEET_ID='15O6ZoZjfTnzZKRDgGUZBNzuD88KyfvvJ';
+const CSV_URL=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+
+// ── Detecció dinàmica de dies ──────────────────────────────────────────────
+// Afegeix mesos aquí si calen nous idiomes
+const MONTH_NUM={
+  'juny':6,'junio':6,'juin':6,'june':6,
+  'juliol':7,'julio':7,'juillet':7,'july':7,
+};
+// Dia de la cursa: canvia 'num' si la sortida canvia de dia
+const RACE_DAY_CFG={num:5,months:['julio','juliol','juillet','july'],month:7};
+
+// Noms de dies acceptats (normalitzats, sense accents)
+const KNOWN_DAY_STARTS=['dilluns','dimarts','dimecres','dijous','divendres','dissabte','diumenge',
+  'lunes','martes','miercoles','jueves','viernes','sabado','domingo',
+  'lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+
+function normStr(s){
+  return(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+
+// Fallback: detecció per text (quan col A no té data)
+function parseDayHeaderText(raw){
+  if(!raw||raw.length>80)return null;
+  const n=normStr(raw);
+  if(!KNOWN_DAY_STARTS.some(d=>n.startsWith(d)))return null;
+  const m=n.match(/(\d+)\s+de\s+(\w+)/);
+  if(!m)return null;
+  const dayNum=parseInt(m[1],10);
+  const mo=m[2];
+  const moNum=MONTH_NUM[mo];
+  if(!moNum||dayNum<1||dayNum>31)return null;
+  const star=RACE_DAY_CFG.months.includes(mo)&&dayNum===RACE_DAY_CFG.num;
+  return{key:raw.trim(),short:dayNum+'\n'+mo.slice(0,3),date:dayNum+'/'+moNum,dayNum,moNum,star};
+}
+
+// Nou: detecció per data a columna A (DD/MM/YYYY o YYYY-MM-DD)
+function parseColADate(s){
+  if(!s||!s.trim())return null;
+  const t=s.trim();
+  const m1=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m1)return{day:+m1[1],month:+m1[2],year:+m1[3]};
+  const m2=t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m2)return{day:+m2[3],month:+m2[2],year:+m2[1]};
+  return null;
+}
+
+function makeDayFromDate(d,label){
+  const moEntry=Object.entries(MONTH_NUM).find(([k,v])=>v===d.month);
+  const moName=moEntry?moEntry[0]:'';
+  const star=d.day===RACE_DAY_CFG.num&&d.month===RACE_DAY_CFG.month;
+  const key=label||(d.day+'/'+d.month+'/'+d.year);
+  return{key,short:d.day+'\n'+moName.slice(0,3),date:d.day+'/'+d.month,dayNum:d.day,moNum:d.month,star};
+}
+
+function buildDays(rows){
+  const days=[];const seen=new Set();
+  for(const r of rows){
+    // Nou: data a columna A
+    const d=parseColADate(r[0]);
+    if(d){
+      const label=(r[1]||'').trim();
+      const dh=makeDayFromDate(d,label);
+      if(!seen.has(dh.key)){seen.add(dh.key);days.push(dh);}
+      continue;
+    }
+    // Fallback: text a columna B (o A)
+    const v=(r[1]||r[0]||'').trim();
+    const dh=parseDayHeaderText(v);
+    if(dh&&!seen.has(dh.key)){seen.add(dh.key);days.push(dh);}
+  }
+  return days;
+}
+// ──────────────────────────────────────────────────────────────────────────
+
+const RESP_MAP=[
+  {match:'ASO',              label:'ASO',          bg:'#cce9f7',color:'#0d0d4a',dot:'#00b2e3'},
+  {match:'TGNA ESPORTS',     label:'Tgna Esports', bg:'#fde0ec',color:'#8b0040',dot:'#f75291'},
+  {match:'TARRAGONA ESPORTS',label:'Tgna Esports', bg:'#fde0ec',color:'#8b0040',dot:'#f75291'},
+  {match:' TE',              label:'Tgna Esports', bg:'#fde0ec',color:'#8b0040',dot:'#f75291'},
+  {match:'TE ',              label:'Tgna Esports', bg:'#fde0ec',color:'#8b0040',dot:'#f75291'},
+  {match:'GU',               label:'GU',           bg:'#fbbcba',color:'#7a1010',dot:'#e9473f'},
+  {match:'ROMAIN',           label:'Romain',       bg:'#c0e8b4',color:'#1a5c0f',dot:'#45ac34'},
+  {match:'MOSSOS',           label:'Mossos',       bg:'#f5face',color:'#3d4d00',dot:'#D0E13D'},
+  {match:'PROSEÑAL',         label:'Proseñal',     bg:'#fef08a',color:'#5c4200',dot:'#d4a000'},
+];
+const DEF={bg:'#fef3e2',color:'#7a4000',dot:'#F59F27'};
+
+function getRStyle(r){
+  if(!r)return DEF;
+  const u=' '+r.toUpperCase()+' ';
+  return RESP_MAP.find(m=>u.includes(m.match.toUpperCase()))||DEF;
+}
+function getRLabel(r){
+  if(!r)return null;
+  const u=' '+r.toUpperCase()+' ';
+  const f=RESP_MAP.find(m=>u.includes(m.match.toUpperCase()));
+  return f?f.label:r.trim();
+}
+function getStyleForLabel(label){
+  const f=RESP_MAP.find(m=>m.label===label);
+  return f?{bg:f.bg,color:f.color,dot:f.dot}:DEF;
+}
+function getLabels(r){
+  if(!r)return[];
+  const parts=r.split(/[+\/]/).map(p=>p.trim()).filter(Boolean);
+  if(parts.length>1)return parts.map(p=>getRLabel(p)||p);
+  const u=' '+r.toUpperCase()+' ';
+  const found=[];
+  for(const m of RESP_MAP){
+    if(u.includes(m.match.toUpperCase())&&!found.includes(m.label))found.push(m.label);
+  }
+  return found.length>0?found:[r.trim()];
+}
+
+function timeToMin(t){
+  if(!t||t==='TD')return -1;
+  const parts=(t+':0').split(':').map(Number);
+  return parts[0]*60+(parts[1]||0);
+}
+
+function parseCSV(t){
+  const rows=[];let field='',cur=[],inQ=false;
+  for(let i=0;i<t.length;i++){
+    const c=t[i],n=t[i+1];
+    if(c==='"'){if(inQ&&n==='"'){field+='"';i++;}else inQ=!inQ;}
+    else if(c===','&&!inQ){cur.push(field.trim());field='';}
+    else if((c==='\n'||(c==='\r'&&n==='\n'))&&!inQ){
+      if(c==='\r')i++;
+      cur.push(field.trim());field='';
+      if(cur.some(x=>x))rows.push(cur);
+      cur=[];
+    }else field+=c;
+  }
+  if(field||cur.length){cur.push(field.trim());if(cur.some(x=>x))rows.push(cur);}
+  return rows;
+}
+
+function groupByDay(rows){
+  const res={};let cur=null;
+  for(const r of rows){
+    // Nou: data a columna A
+    const d=parseColADate(r[0]);
+    if(d){
+      const label=(r[1]||'').trim();
+      cur=makeDayFromDate(d,label).key;
+      if(!res[cur])res[cur]=[];
+      continue;
+    }
+    // Fallback: text a columna B (o A)
+    const v=(r[1]||r[0]||'').trim();
+    const dh=parseDayHeaderText(v);
+    if(dh){cur=dh.key;if(!res[cur])res[cur]=[];continue;}
+    if(!cur)continue;
+    const vUp=v.toUpperCase();
+    if(vUp==='HORA'||vUp==='HOUR'||vUp==='CONCEPTE')continue;
+    // Auto-detect estructura: si r[0] té contingut i no és data → estructura antiga (HORA a col A)
+    const colAraw=(r[0]||'').trim();
+    const isOldStruct=colAraw&&!parseColADate(colAraw);
+    let hora2,horaFi2,concepte2,obs2,ubicacio2,responsable2;
+    if(isOldStruct){
+      // Estructura antiga: HORA=r[0], CONCEPTE=r[2], OBS=r[3], UBICACIÓ=r[4], RESP=r[5]
+      hora2=colAraw;horaFi2='';
+      concepte2=(r[2]||'').trim();obs2=(r[3]||'').trim();
+      ubicacio2=(r[4]||'').trim();responsable2=(r[5]||'').trim();
+    }else{
+      // Estructura nova: HORA=r[1], HORA_FI=r[2], CONCEPTE=r[3], OBS=r[4], UBICACIÓ=r[5], RESP=r[6]
+      hora2=v;horaFi2=(r[2]||'').trim();
+      concepte2=(r[3]||'').trim();obs2=(r[4]||'').trim();
+      ubicacio2=(r[5]||'').trim();responsable2=(r[6]||'').trim();
+    }
+    if(!concepte2||concepte2.toUpperCase()==='CONCEPTE')continue;
+    const estat2=isOldStruct?(r[6]||'').trim().toUpperCase():(r[7]||'').trim().toUpperCase();
+    res[cur].push({hora:hora2,horaFi:horaFi2,concepte:concepte2,obs:obs2,ubicacio:ubicacio2,responsable:responsable2,estat:estat2||''});
+  }
+  return res;
+}
+
+const ESTAT_STYLES={
+  'FET':      {cardBg:'rgba(69,172,52,0.06)', opacity:0.72, badge:{bg:'#c0e8b4',color:'#1a5c0f',text:'Fet'},      bar:{color:'#45ac34',pulse:false}, pastGray:true},
+  'EN PROCÉS':{cardBg:'rgba(254,232,3,0.08)', opacity:1,    badge:{bg:'#fef08a',color:'#5c4200',text:'En procés'},bar:{color:'#fee803',pulse:true},  pastGray:false},
+  'PENDENT':  {cardBg:'rgba(239,68,68,0.05)', opacity:1,    badge:{bg:'#fee2e2',color:'#991b1b',text:'Pendent'},  bar:null,                          pastGray:false},
+  '':         {cardBg:null,                   opacity:1,    badge:null,                                           bar:null,                          pastGray:true},
+};
+function getEstatStyle(e){return ESTAT_STYLES[e]??ESTAT_STYLES[''];}
+
+function Countdown(){
+  const [t,setT]=useState({});
+  useEffect(()=>{
+    const target=new Date('2026-07-05T13:45:00');
+    const tick=()=>{
+      const diff=target-new Date();
+      if(diff<=0){setT({done:true});return;}
+      setT({d:Math.floor(diff/86400000),h:Math.floor((diff%86400000)/3600000),
+            m:Math.floor((diff%3600000)/60000),s:Math.floor((diff%60000)/1000)});
+    };
+    tick();const id=setInterval(tick,1000);return()=>clearInterval(id);
+  },[]);
+  if(t.done)return<div className="text-yellow-200 font-black text-lg">🎉 SORTIDA!</div>;
+  return(
+    <div className="flex gap-2 items-end">
+      {[['d','d'],['h','h'],['m','m'],['s','s']].map(([k,l])=>(
+        <div key={k} className="text-center bg-white/10 rounded-xl px-1.5 sm:px-2.5 py-1.5 min-w-10 sm:min-w-12">
+          <div className="text-lg sm:text-2xl font-black text-[#fee803] tabular-nums leading-none">{String(t[k]??'--').padStart(2,'0')}</div>
+          <div className="text-[#00b2e3] text-xs font-semibold uppercase">{l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RespBadge({resp}){
+  if(!resp)return null;
+  const s=getRStyle(resp);
+  return(
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold" style={{background:s.bg,color:s.color}}>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background:s.dot}}></span>
+      {resp.trim()}
+    </span>
+  );
+}
+
+function EventCard({ev,hideResp,isPast=false}){
+  const [open,setOpen]=useState(false);
+  const s=getRStyle(ev.responsable);
+  const es=getEstatStyle(ev.estat);
+  const overlayBadge=isPast&&!es.pastGray&&es.badge;
+  const cardStyle=isPast
+    ?{background:'white',filter:'grayscale(0.9)',opacity:0.5}
+    :{background:es.cardBg||'white',opacity:es.opacity};
+  return(
+    <div className="relative">
+      <div className="rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all overflow-hidden cursor-pointer"
+        style={cardStyle}
+        onClick={()=>ev.obs&&setOpen(o=>!o)}>
+        <div className="flex">
+          <div className="w-2 flex-shrink-0 rounded-l-xl" style={{background:s.dot}}></div>
+          <div className="flex-1 p-3">
+            <div className="flex items-start gap-2">
+              <p className="flex-1 text-sm font-semibold text-gray-900 leading-snug">{ev.concepte}</p>
+              {ev.obs&&<span className="text-[#00b2e3] flex-shrink-0 mt-0.5 bg-[#00b2e3]/10 rounded-full p-0.5">{open?<ChevronUp size={15}/>:<ChevronDown size={15}/>}</span>}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {!hideResp&&<RespBadge resp={ev.responsable}/>}
+              {hideResp&&ev.hora&&ev.hora!=='TD'&&(
+                <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black bg-[#0d0d4a] text-white">
+                  <Clock size={11}/>{ev.hora}{ev.horaFi&&' — '+ev.horaFi}
+                </span>
+              )}
+              {hideResp&&!ev.hora&&(
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-400 italic">Tot dia</span>
+              )}
+              {ev.ubicacio&&(
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-500">
+                  <MapPin size={10}/>{ev.ubicacio}
+                </span>
+              )}
+              {!hideResp&&ev.horaFi&&(
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-500">
+                  <Clock size={10}/> fins {ev.horaFi}
+                </span>
+              )}
+              {!overlayBadge&&es.badge&&(
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ml-auto flex-shrink-0" style={{background:es.badge.bg,color:es.badge.color}}>
+                  {es.badge.text}
+                </span>
+              )}
+            </div>
+            {open&&ev.obs&&(
+              <div className="mt-2.5 pt-2.5 border-t border-gray-100 text-xs text-gray-600 whitespace-pre-wrap leading-relaxed fadeIn">{ev.obs}</div>
+            )}
+          </div>
+        </div>
+        {es.bar&&!isPast&&<div className={`h-[3px] w-full${es.bar.pulse?' pulse-bar':''}`} style={{background:es.bar.color}}/>}
+      </div>
+      {overlayBadge&&(
+        <span className="absolute bottom-2 right-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold shadow-sm pointer-events-none" style={{background:es.badge.bg,color:es.badge.color}}>
+          {es.badge.text}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function DayTimeline({events,search='',filterResp='',isPast=false}){
+  const filtered=useMemo(()=>events.filter(ev=>{
+    const q=search.toLowerCase();
+    if(q&&![ev.concepte,ev.obs,ev.responsable,ev.ubicacio].some(x=>x&&x.toLowerCase().includes(q)))return false;
+    if(filterResp&&!getLabels(ev.responsable).includes(filterResp))return false;
+    return true;
+  }),[events,search,filterResp]);
+
+  const groups=useMemo(()=>{
+    const g={};
+    for(const ev of filtered){const k=ev.hora||'TD';if(!g[k])g[k]=[];g[k].push(ev);}
+    return Object.entries(g).sort(([a],[b])=>timeToMin(a)-timeToMin(b));
+  },[filtered]);
+
+  if(!groups.length)return(
+    <div className="text-center py-16 text-gray-400">
+      <div className="text-4xl mb-2">🔍</div>
+      <p className="text-sm">{events.length>0?'Cap resultat':'Sense accions programades'}</p>
+    </div>
+  );
+  return(
+    <div className="space-y-2 fadeIn">
+      {groups.map(([time,evs])=>(
+        <div key={time} className="flex gap-3 items-start">
+          <div className="w-16 flex-shrink-0 text-right pt-3.5">
+            {time==='TD'
+              ?<span className="text-xs font-bold text-gray-400 bg-gray-200 px-1.5 py-0.5 rounded uppercase">Tot dia</span>
+              :<span className="text-sm font-black text-gray-700">{time}</span>
+            }
+          </div>
+          <div className="flex flex-col items-center flex-shrink-0 pt-3.5">
+            <div className="w-3.5 h-3.5 rounded-full border-2 border-[#00b2e3] bg-[#00b2e3]/30 flex-shrink-0 shadow"></div>
+            {evs.length>1&&<div className="w-0.5 bg-[#00b2e3]/20 flex-1 mt-1" style={{minHeight:'1.5rem'}}></div>}
+          </div>
+          <div className="flex-1 space-y-2 pb-2">
+            {evs.map((ev,i)=><EventCard key={i} ev={ev} isPast={isPast}/>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HomeView({data,days,onSelectResp,onSelectDay}){
+  const stats=useMemo(()=>{
+    const m={};
+    Object.entries(data).forEach(([dayKey,evs])=>{
+      evs.forEach(ev=>{
+        if(!ev.responsable)return;
+        getLabels(ev.responsable).forEach(label=>{
+          const s=getStyleForLabel(label);
+          if(!m[label])m[label]={label,bg:s.bg,color:s.color,dot:s.dot,count:0,days:new Set()};
+          m[label].count++;
+          m[label].days.add(dayKey);
+        });
+      });
+    });
+    return Object.values(m).sort((a,b)=>b.count-a.count);
+  },[data]);
+
+  const totalAcc=useMemo(()=>Object.values(data).reduce((s,a)=>s+a.length,0),[data]);
+
+  return(
+    <div className="space-y-5 fadeIn">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <button onClick={()=>onSelectResp(null)}
+          className="w-full rounded-2xl border-2 border-[#0d0d4a] p-4 mb-4 text-left hover:scale-[1.005] transition-all shadow-md flex items-center justify-between gap-4"
+          style={{background:'linear-gradient(135deg,#0d0d4a,#0f0f6e)'}}>
+          <div className="flex items-center gap-4">
+            <div className="text-4xl font-black text-white leading-none">{totalAcc}</div>
+            <div>
+              <div className="text-sm font-black text-white">Totes les accions</div>
+              <div className="text-xs text-white opacity-50 mt-0.5">{days.filter(d=>data[d.key]?.length>0).length} dies actius</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-bold text-[#00b2e3] flex-shrink-0">Veure calendari <ChevronRight size={12}/></div>
+        </button>
+        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Filtra per Responsables</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {stats.map((s,i)=>(
+            <button key={i} onClick={()=>onSelectResp(s.label)}
+              className="rounded-xl border-2 p-3 text-left hover:scale-[1.02] active:scale-[0.98] transition-all"
+              style={{background:s.bg,borderColor:s.dot,color:s.color,boxShadow:`0 2px 8px ${s.dot}22`}}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background:s.dot}}></span>
+                <span className="text-xs font-black truncate">{s.label}</span>
+              </div>
+              <div className="text-xs font-semibold opacity-70">{s.count} tasques</div>
+              <div className="text-xs opacity-50">{s.days.size} dies</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RespTimelineView({data,days,respLabel,onBack}){
+  const s=useMemo(()=>{
+    for(const evs of Object.values(data)){
+      const ev=evs.find(e=>getLabels(e.responsable).includes(respLabel));
+      if(ev)return getRStyle(ev.responsable);
+    }
+    return getStyleForLabel(respLabel)||DEF;
+  },[data,respLabel]);
+
+  const dayGroups=useMemo(()=>{
+    const result=[];
+    for(const day of days){
+      const evs=(data[day.key]||[]).filter(ev=>
+        getLabels(ev.responsable).includes(respLabel)
+      );
+      if(evs.length>0){
+        const sorted=[...evs].sort((a,b)=>timeToMin(a.hora||'TD')-timeToMin(b.hora||'TD'));
+        result.push({day,evs:sorted});
+      }
+    }
+    return result;
+  },[data,days,respLabel,search]);
+
+  const total=dayGroups.reduce((s,g)=>s+g.evs.length,0);
+
+  return(
+    <div className="fadeIn">
+      <div className="rounded-2xl p-4 mb-4 flex items-center gap-3" style={{background:s.bg,border:`2px solid ${s.dot}`}}>
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{background:s.dot}}>
+          <Users size={22} color="white"/>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-lg font-black truncate" style={{color:s.color}}>{respLabel}</div>
+          <div className="text-xs opacity-60" style={{color:s.color}}>{total} accions · {dayGroups.length} dies</div>
+        </div>
+        <button onClick={onBack}
+          className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold hover:bg-white/50 transition flex-shrink-0"
+          style={{color:s.color}}>
+          <ArrowLeft size={14}/> Tornar
+        </button>
+      </div>
+
+      {dayGroups.length===0?(
+        <div className="text-center py-16 text-gray-400">
+          <div className="text-4xl mb-2">🔍</div>
+          <p className="text-sm">Cap resultat</p>
+        </div>
+      ):(
+        <div className="space-y-5">
+          {dayGroups.map(({day,evs})=>(
+            <div key={day.key}>
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <Calendar size={14} className="text-[#00b2e3] flex-shrink-0"/>
+                <span className="text-sm font-black text-gray-800">{day.key}</span>
+                {day.star&&<span className="text-white text-xs font-black px-2 py-0.5 rounded-full" style={{background:'#e9473f'}}>DIA SORTIDA</span>}
+                <span className="text-xs text-gray-400 ml-auto">{evs.length} acc.</span>
+              </div>
+              <div className="space-y-2">
+                {evs.map((ev,i)=><EventCard key={i} ev={ev} hideResp={true}/>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Vista Calendari: dies futurs dalt (colors), dies passats a baix (grisos) ─
+function CalendarView({data,days,filterResp='',onFilterChange}){
+  const today=useMemo(()=>{const d=new Date();d.setHours(0,0,0,0);return d;},[]);
+
+  const allResp=useMemo(()=>{
+    const seen=new Map();
+    days.forEach(d=>{
+      (data[d.key]||[]).forEach(ev=>{
+        if(!ev.responsable)return;
+        getLabels(ev.responsable).forEach(label=>{
+          if(!seen.has(label))seen.set(label,getStyleForLabel(label));
+        });
+      });
+    });
+    return[...seen.entries()].sort(([a],[b])=>a.localeCompare(b));
+  },[data,days]);
+
+  const {futureDays,pastDays}=useMemo(()=>{
+    let active=days.filter(d=>data[d.key]?.length>0);
+    if(filterResp)active=active.filter(d=>(data[d.key]||[]).some(ev=>getLabels(ev.responsable).includes(filterResp)));
+    const future=active.filter(d=>new Date(2026,d.moNum-1,d.dayNum)>=today);
+    const past=[...active.filter(d=>new Date(2026,d.moNum-1,d.dayNum)<today)].reverse();
+    return{futureDays:future,pastDays:past};
+  },[data,days,today,filterResp]);
+
+  const renderDay=(d,isPast)=>{
+    const evs=[...data[d.key]].sort((a,b)=>timeToMin(a.hora||'TD')-timeToMin(b.hora||'TD'));
+    return(
+      <div key={d.key}>
+        <div className={`flex items-center gap-2 mb-3 py-1.5 px-1 rounded-lg ${isPast?'bg-gray-200':'bg-gray-100'}`}>
+          <Calendar size={14} className={`flex-shrink-0 ${isPast?'text-gray-400':'text-[#00b2e3]'}`}/>
+          <span className={`text-sm font-black ${isPast?'text-gray-400':'text-gray-800'}`}>{d.key}</span>
+          {d.star&&<span className="text-white text-xs font-black px-2 py-0.5 rounded-full" style={{background:isPast?'#9CA3AF':'#e9473f'}}>DIA SORTIDA</span>}
+          <span className="text-xs text-gray-400 ml-auto">{evs.length} acc.</span>
+        </div>
+        <DayTimeline events={evs} search="" filterResp={filterResp} isPast={isPast}/>
+      </div>
+    );
+  };
+
+  return(
+    <div className="space-y-6 fadeIn">
+      {allResp.length>0&&(
+        <div className="flex flex-wrap gap-1.5 pb-2 border-b border-gray-200">
+          <button onClick={()=>onFilterChange('')}
+            className={`px-3 py-1.5 text-xs rounded-full border font-semibold transition ${!filterResp?'bg-[#0d0d4a] text-white border-[#0d0d4a]':'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
+            Tots
+          </button>
+          {allResp.map(([resp,s])=>(
+            <button key={resp} onClick={()=>onFilterChange(filterResp===resp?'':resp)}
+              className={`px-2.5 py-1.5 text-xs rounded-full border font-semibold transition flex items-center gap-1 ${filterResp===resp?'border-2 shadow-sm':'bg-white border-gray-200 hover:border-gray-300'}`}
+              style={filterResp===resp?{background:s.dot,color:['#d4a000','#fee803','#D0E13D'].includes(s.dot)?'#0d0d4a':'#fff',borderColor:s.dot}:{}}>
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background:s.dot}}></span>
+              {resp}
+            </button>
+          ))}
+        </div>
+      )}
+      {futureDays.length===0&&filterResp&&(
+        <div className="text-center py-12 text-gray-400">
+          <div className="text-4xl mb-2">🔍</div>
+          <p className="text-sm">Cap dia amb tasques de <strong>{filterResp}</strong></p>
+        </div>
+      )}
+      {futureDays.map(d=>renderDay(d,false))}
+      {pastDays.length>0&&(
+        <>
+          <div className="flex items-center gap-3 py-3">
+            <div className="flex-1 h-px bg-gray-300"/>
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest px-3">Finalitzats</span>
+            <div className="flex-1 h-px bg-gray-300"/>
+          </div>
+          {pastDays.map(d=>renderDay(d,true))}
+        </>
+      )}
+    </div>
+  );
+}
+// ──────────────────────────────────────────────────────────────────────────
+
+function App(){
+  const [data,setData]=useState({});
+  const [days,setDays]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [view,setView]=useState('calendar');
+  const [selDay,setSelDay]=useState(null);
+  const [selResp,setSelResp]=useState(null);
+  const [filterResp,setFilterResp]=useState('');
+  const [globalFilterResp,setGlobalFilterResp]=useState('');
+
+  const load=useCallback(async()=>{
+    setLoading(true);setErr(null);
+    try{
+      const res=await fetch(CSV_URL);
+      const text=await res.text();
+      const parsed=parseCSV(text);
+      setDays(buildDays(parsed));
+      setData(groupByDay(parsed));
+    }catch(e){setErr('Error carregant: '+e.message);}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{load();},[]);
+
+  const totalAcc=useMemo(()=>Object.values(data).reduce((s,a)=>s+a.length,0),[data]);
+  const daysOK=useMemo(()=>days.filter(d=>data[d.key]?.length>0).length,[data,days]);
+  const curEv=selDay?data[selDay]||[]:[];
+  const dayConf=days.find(d=>d.key===selDay);
+
+  const allResp=useMemo(()=>{
+    const seen=new Map();
+    curEv.forEach(ev=>{
+      if(!ev.responsable)return;
+      getLabels(ev.responsable).forEach(label=>{
+        if(!seen.has(label))seen.set(label,getStyleForLabel(label));
+      });
+    });
+    return[...seen.entries()].sort(([a],[b])=>a.localeCompare(b));
+  },[curEv]);
+
+  const goHome=()=>{setView('home');setSelResp(null);};
+  const goCalendar=()=>setView('calendar');
+  const goDay=(key)=>{setSelDay(key);setView('day');setFilterResp(globalFilterResp);};
+  const goResp=(label)=>{
+    if(!label){goCalendar();}
+    else{setSelResp(label);setView('resp');}
+  };
+
+  const navActive='border-[#00b2e3] text-[#0d0d4a] bg-[#E8F8FD]';
+  const navIdle='border-transparent text-gray-400 hover:text-gray-600';
+
+  return(
+    <div className="min-h-screen bg-gray-100">
+      <div className="shadow-lg relative overflow-hidden" style={{background:'linear-gradient(135deg,#0d0d4a 0%,#0f0f6e 55%,#007aad 100%)'}}>
+        <div className="absolute inset-0 opacity-5 pointer-events-none">
+          <div className="absolute top-0 right-0 w-80 h-80 rounded-full bg-black transform translate-x-20 -translate-y-20"></div>
+        </div>
+        <div className="relative max-w-4xl mx-auto px-4 py-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <img src="https://www.moutserveis.com/wp-content/uploads/2026/06/image-5-scaled.png" alt="Tarragona Esports" className="h-[57px] object-contain"/>
+                <div>
+                  <h1 className="text-white font-black text-xl leading-none tracking-tight">Tour de França 2026</h1>
+                  <p className="text-blue-200 text-sm mt-0.5">2a. Etapa SORTIDA <strong className="text-white">Tarragona 5/7/26</strong></p>
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <span className="bg-white/10 text-white text-xs font-semibold px-2.5 py-1 rounded-full">📋 <strong>{totalAcc}</strong> accions</span>
+                <span className="bg-white/10 text-white text-xs font-semibold px-2.5 py-1 rounded-full">📅 <strong>{daysOK}</strong> dies actius</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Countdown/>
+              <button onClick={load} className="p-2.5 bg-white/10 hover:bg-white/20 active:scale-95 rounded-xl transition-all" title="Actualitzar">
+                <RefreshCw size={16} className={`text-white ${loading?'spin':''}`}/>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{height:'5px',display:'flex'}}>
+        <div style={{flex:1,background:'#00b2e3'}}></div>
+        <div style={{flex:1,background:'#45ac34'}}></div>
+        <div style={{flex:1,background:'#fee803'}}></div>
+        <div style={{flex:1,background:'#e9473f'}}></div>
+      </div>
+
+      <div className="bg-white border-b shadow-sm sticky top-0 z-20">
+        <div className="max-w-4xl mx-auto flex items-center">
+          <div className="flex items-center overflow-x-auto scrollbar-hide flex-shrink-0">
+            <button onClick={goCalendar}
+              className={`px-4 py-3 text-xs font-bold transition border-b-2 flex items-center gap-1.5 flex-shrink-0 ${view==='calendar'||view==='day'?navActive:navIdle}`}>
+              <Calendar size={13}/> Calendari
+            </button>
+            
+            {view==='day'&&selDay&&(
+              <><span className="text-gray-300 text-xs flex-shrink-0">›</span>
+              <span className="px-3 py-3 text-xs font-bold text-[#00b2e3] truncate max-w-36">{dayConf?.date} · {selDay.split(' ').slice(1,3).join(' ')}</span></>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-0.5 px-2 py-1.5 border-l border-gray-100 overflow-x-auto scrollbar-hide">
+            {days.map(d=>{
+              const n=data[d.key]?.length||0;
+              if(!n)return null;
+              const maxN=Math.max(...days.map(x=>data[x.key]?.length||0),1);
+              const pct=n/maxN;
+              let bg,tc;
+              if(d.star){bg='#e9473f';tc='#fff';}
+              else if(pct<0.2){bg='#45ac34';tc='#fff';}
+              else if(pct<0.5){bg='#00b2e3';tc='#fff';}
+              else if(pct<0.75){bg='#fee803';tc='#5c4200';}
+              else{bg='#e9473f';tc='#fff';}
+              const isAct=selDay===d.key&&view==='day';
+              return(
+                <button key={d.key} onClick={()=>goDay(d.key)}
+                  title={d.key+' · '+n+' acc.'}
+                  className={`flex-shrink-0 w-7 h-7 rounded-lg text-[10px] font-black transition-all hover:scale-110 flex items-center justify-center${isAct?' ring-2 ring-[#00b2e3] scale-110':''}`}
+                  style={{background:bg,color:tc}}>
+                  {d.date.split('/')[0]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {loading&&(
+        <div className="flex items-center justify-center py-20 gap-3 text-gray-500">
+          <RefreshCw size={20} className="spin text-[#00b2e3]"/>
+          <span className="text-sm">Carregant des de Google Sheets...</span>
+        </div>
+      )}
+      {err&&!loading&&(
+        <div className="max-w-4xl mx-auto px-4 mt-6">
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4 text-sm">
+            <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5"/>
+            <div>
+              <p className="font-bold text-red-800">Error carregant dades</p>
+              <p className="text-red-600 text-xs mt-0.5">{err}</p>
+              <button onClick={load} className="mt-2 text-xs underline text-red-700">Torna a intentar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading&&!err&&(
+        <div className="max-w-4xl mx-auto px-4 py-5">
+          {view==='calendar'&&<CalendarView data={data} days={days} filterResp={globalFilterResp} onFilterChange={setGlobalFilterResp}/>}
+          {view==='day'&&selDay&&(
+            <div className="fadeIn">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Calendar size={15} className="text-[#00b2e3]"/>
+                    <h2 className="text-base font-black text-gray-900">{selDay}</h2>
+                    {dayConf?.star&&<span className="text-white text-xs font-black px-2 py-0.5 rounded-full" style={{background:'#e9473f'}}>DIA SORTIDA</span>}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5 ml-5">{curEv.length} accions programades</p>
+                </div>
+                <button onClick={goCalendar}
+                  className="text-xs text-gray-400 hover:text-gray-600 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:shadow-sm transition flex items-center gap-1 flex-shrink-0 ml-2">
+                  <ArrowLeft size={12}/> Calendari
+                </button>
+              </div>
+              <div className="space-y-2 mb-4">
+                {allResp.length>0&&(
+                  <div className="flex flex-wrap gap-1.5">
+                    <button onClick={()=>setFilterResp('')}
+                      className={`px-3 py-1.5 text-xs rounded-full border font-semibold transition ${!filterResp?'bg-[#0d0d4a] text-white border-[#0d0d4a]':'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
+                      Tots
+                    </button>
+                    {allResp.map(([resp,s])=>(
+                      <button key={resp} onClick={()=>setFilterResp(filterResp===resp?'':resp)}
+                        className={`px-2.5 py-1.5 text-xs rounded-full border font-semibold transition flex items-center gap-1 ${filterResp===resp?'border-2 shadow-sm':'bg-white border-gray-200 hover:border-gray-300'}`}
+                        style={filterResp===resp?{background:s.dot,color:s.dot==='#d4a000'||s.dot==='#fee803'?'#0d0d4a':'#fff',borderColor:s.dot}:{}}>
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background:s.dot}}></span>
+                        {resp}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <DayTimeline events={curEv} search="" filterResp={filterResp}/>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="pb-8"/>
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

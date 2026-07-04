@@ -1,0 +1,10 @@
+# Dades (no al repo)
+*.xlsx
+*.xls
+*.csv
+
+# Brief intern
+Prompt Agent*.md
+
+# Sistema
+.DS_Store
