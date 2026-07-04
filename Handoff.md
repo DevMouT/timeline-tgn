@@ -6,9 +6,9 @@
 
 ## Estat del projecte
 
-**Data última actualització:** 4 juliol 2026, ~02:30h
-**Branca activa:** `estats-tasques`
-**Estat general:** ✅ Funcional en producció. Nova feature d'estats implementada i testada localment, pendent de pujar a Vercel.
+**Data última actualització:** 4 juliol 2026, ~03:05h
+**Branca activa:** `main`
+**Estat general:** ✅ Funcional en producció. Sistema d'estats implementat, testada localment i desplegada a Vercel via GitHub.
 
 ---
 
@@ -30,18 +30,18 @@
 
 ### Pendent de fer ara mateix
 
-- [ ] Pujar `index.html` a Vercel (`timelinev4`) manualment
-- [ ] Verificar a `timeline.tarragonaeltouracasa.cat`
-- [ ] Decidir si fem el responsive del mini-calendari (tasca 1) abans del 5 de juliol
+- [ ] Verificar funcionament a `timeline.tarragonaeltouracasa.cat` (estats visuals)
+- [ ] Decidir si fem el responsive del mini-calendari (tasca 1) — baixa urgència
 
 ---
 
 ## Contexte crític que cal saber
 
-### ⚠️ Vercel NO connectat a GitHub
-El projecte `timelinev4` de Vercel (el que serveix `timeline.tarragonaeltouracasa.cat`) **no té el repo GitHub connectat**. El deploy és sempre manual: pujar l'`index.html` directament a Vercel.
+### ✅ Vercel connectat a GitHub (des de 4/7/2026)
+El projecte `timelinev4` de Vercel ara està connectat al repo `DevMouT/timeline-tgn`.
+**Deploy automàtic:** cada `git push` a `main` desplega automàticament a producció.
 
-Si algun dia es vol connectar: Vercel → `timelinev4` → Settings → Git → connectar `DevMouT/timeline-tour2`.
+> Nota: el commit author (`oskarp7@gmail.com` / `Oskarp007`) no coincideix amb el compte Vercel principal però el deploy funciona igualment.
 
 ### ⚠️ No obrir index.html amb doble clic
 El `fetch()` des de `file://` falla per CORS. Per testejar en local cal:
@@ -77,10 +77,9 @@ El flux de dades és: editar `TIMELINE TOUR.xlsx` en local → reemplaçar a Goo
 
 | Branca | Estat | Contingut |
 |--------|-------|-----------|
-| `main` | Producció (però desfasada) | Versió antiga, NO és la live |
-| `estats-tasques` | En curs | Sistema d'estats + bug CSS fix |
+| `main` | ✅ Producció | Versió live — sistema d'estats + bug CSS fix |
 
-> Nota: `main` al GitHub NO és la versió live. La versió live es va pujar manualment a Vercel en un moment anterior. Caldrà sincronitzar quan es pugui.
+**Repo:** [github.com/DevMouT/timeline-tgn](https://github.com/DevMouT/timeline-tgn)
 
 ---
 
@@ -126,11 +125,31 @@ timeline-tour2/
 
 ## Historial de sessions
 
-### Sessió 1 — 4 juliol 2026 (~00:00h - ~02:30h)
+## Flux de treball actual
+
+```
+Edites index.html localment
+  → python3 -m http.server 8080  (provar a localhost:8080)
+  → git add . && git commit -m "descripció" && git push
+  → Vercel desplega automàticament a timeline.tarragonaeltouracasa.cat ✅
+
+Edites TIMELINE TOUR.xlsx localment
+  → Reemplaçar a Google Drive
+  → L'app llegeix el CSV en temps real (sense deploy) ✅
+```
+
+---
+
+## Historial de sessions
+
+### Sessió 1 — 4 juliol 2026 (~00:00h - ~03:05h)
 - Lectura del brief i investigació de l'estat del projecte
 - Descoberta discrepància local vs. Vercel (2KB de diferència)
 - Substitució de l'`index.html` local per la versió correcta de producció
-- Implementació del sistema d'estats (FET/EN PROCÉS/PENDENT)
-- Correcció bug CSS animació refresc
-- Creació documentació completa
-- **Pendent:** Pujar a Vercel
+- Correcció bug CSS animació refresc (`rotate(360eg)` → `rotate(360deg)`)
+- Implementació sistema d'estats (FET/EN PROCÉS/PENDENT) — columna H Excel
+- Estils visuals: fons de color + pill + línia inferior animada per EN PROCÉS
+- Trick CSS: pills en color als dies passats via overlay absolut fora del div grayscale
+- Creació documentació completa (README, Arquitectura, Handoff, PENDENTS)
+- Nou repo GitHub net: `DevMouT/timeline-tgn`
+- Vercel `timelinev4` connectat a GitHub — deploy automàtic actiu ✅
